@@ -1,0 +1,10 @@
+{
+  "name": "psi-metering-service",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs build",
+    "test": "node scripts/build.mjs test",
+    "test:integration": "node scripts/build.mjs integration",
+    "start": "java -jar target/metering-service.jar"
+  }
+}

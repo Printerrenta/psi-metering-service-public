@@ -1,0 +1,12 @@
+target/
+.idea/
+*.iml
+.vscode/
+.env
+.env.*
+*.log
+.tools/
+.m2/
+!.env.example
+.neon
+node_modules/

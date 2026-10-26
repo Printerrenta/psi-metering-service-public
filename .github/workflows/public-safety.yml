@@ -1,0 +1,27 @@
+name: Public mirror safety
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify exported file checksums
+        run: |
+          python - <<'PY'
+          import hashlib,json,pathlib
+          manifest=json.loads(pathlib.Path('PUBLIC_MIRROR.json').read_text())
+          for item in manifest['files']:
+            assert hashlib.sha256(pathlib.Path(item['path']).read_bytes()).hexdigest()==item['sha256'],item['path']
+          assert not pathlib.Path('cloudbuild.yaml').exists()
+          assert not pathlib.Path('.github/workflows/public-mirror.yml').exists()
+          PY
+      - name: Scan public snapshot
+        run: |
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks dir . --no-banner --redact=100
