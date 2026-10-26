@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "sourceRepository": "Printerrenta/psi-metering-service",
-  "sourceCommit": "a17dd2c4f587ac90ee8cd2619f02d46106de073c",
+  "sourceCommit": "31bfa38695b9bfde64ff4799ab8ce9353b51d654",
   "sourceBranch": "main",
   "history": "Independent public snapshots; no private Git history",
   "files": [
@@ -15,7 +15,7 @@
     },
     {
       "path": ".github/workflows/verify.yml",
-      "sha256": "03705e9975fc288b1a84a7b54ad120349718ec15e77f86561935ef04d4a9f514"
+      "sha256": "09f3a8e16a645eb6a6f2d66978631a198a98847dc81e2457912fbf0993ac19a1"
     },
     {
       "path": ".gitignore",
@@ -31,7 +31,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "f4160f8990ce9f0d8524bacbc8b2da84db77a11e2fbab35c642283a2f373b9e5"
+      "sha256": "065b9f8ecd68d9f529c44a465b802c501316f4e18ae52c4d812ccc3c35befd4a"
     },
     {
       "path": "mvnw",

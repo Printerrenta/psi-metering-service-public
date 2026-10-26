@@ -36,6 +36,6 @@ public snapshot used by integration release pins.
 
 Real deployment settings, credentials, operating evidence and private Git history
 are excluded. Publishing runs after successful source main CI with an allowlist
-and secret scan. Each target has a repository-scoped deploy key. Public CI has no
+and secret scan. Publishing uses a short-lived token for this target. Public CI has no
 deployment credentials and does not deploy GCP. Generated-file changes belong in
 the source before synchronization; direct edits here can be replaced.
