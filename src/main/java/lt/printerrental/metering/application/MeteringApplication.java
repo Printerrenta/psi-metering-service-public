@@ -189,10 +189,9 @@ public class MeteringApplication {
     if (s.status().equals("DRAFT")
         || date.isBefore(s.startDate())
         || date.isAfter(end)
-        || date.isAfter(today)
-        || (!date.equals(YearMonth.from(date).atEndOfMonth()) && !date.equals(end)))
+        || date.isAfter(today))
       throw new IllegalArgumentException(
-          "Reading must represent a closed month or final usage date within the contract");
+          "Reading date must be today or earlier and within the contract usage period");
     counters.requireCapabilities(s.colorCapable(), s.a3Capable());
     var current = readings.onDate(s.contractId(), date);
     if (current.isPresent() && !Objects.equals(current.get().id(), replaces)

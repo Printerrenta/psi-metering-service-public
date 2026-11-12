@@ -162,6 +162,13 @@ class MeteringIT {
   }
 
   @Test
+  void acceptsReadingOnAnOrdinaryDayWithoutWaitingForMonthEnd() {
+    var result = app.submit(contract, input(0, LocalDate.of(2026, 1, 15), 150, null));
+    assertThat(result.reading().asOf()).isEqualTo(LocalDate.of(2026, 1, 15));
+    assertThat(result.reading().status()).isEqualTo("ACCEPTED");
+  }
+
+  @Test
   void correctionKeepsHistoryAndCannotCrossNextAcceptedCounter() {
     var jan = app.submit(contract, input(0, LocalDate.of(2026, 1, 31), 310, null));
     app.submit(contract, input(1, LocalDate.of(2026, 2, 28), 590, null));
