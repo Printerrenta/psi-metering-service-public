@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "sourceRepository": "Printerrenta/psi-metering-service",
-  "sourceCommit": "8660652111151f9be4ee0bb0ecc1aceb7d228935",
+  "sourceCommit": "99196ff6468b382d7de0266ec056e0b1f22f0034",
   "sourceBranch": "main",
   "history": "Independent public snapshots; no private Git history",
   "files": [
@@ -31,7 +31,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "065b9f8ecd68d9f529c44a465b802c501316f4e18ae52c4d812ccc3c35befd4a"
+      "sha256": "0eaabbe6329b9085bcecca4a944b58996ccb2e8e925f6e708bc714f8ef3d12f4"
     },
     {
       "path": "mvnw",

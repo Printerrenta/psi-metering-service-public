@@ -8,6 +8,18 @@ have separate PostgreSQL databases and restricted credentials; the gateway has n
 Controllers delegate use cases, domain objects enforce invariants, and HTTP/JDBC/JPA
 adapters implement local ports. Business models and SQL are not shared between services.
 
+## Reading validation and review
+
+- Readings contain four cumulative counters: A4 mono, A4 color, A3 mono and A3
+  color. Counts must remain consistent with device capabilities and neighboring
+  accepted readings.
+- Staff configure minimum and maximum daily usage through /api/metering/policies
+  using MODEL or DEVICE scope. Device-specific bounds take precedence.
+- Bounds use A4 equivalents: each A3 page counts as two A4 pages.
+- Missing policies or unusual usage produce pending readings. Staff review
+  requires a reason and the current stream version; changing a policy does not
+  automatically approve an existing pending reading.
+
 ## Build and test
 
 ```sh
