@@ -10,6 +10,8 @@ public interface ReadingRepository {
 
   Optional<MeterReading> onDate(UUID contract, LocalDate date);
 
+  Optional<MeterReading> pendingOnDate(UUID contract, LocalDate date);
+
   Optional<MeterReading> previous(UUID contract, LocalDate date);
 
   Optional<MeterReading> next(UUID contract, LocalDate date);

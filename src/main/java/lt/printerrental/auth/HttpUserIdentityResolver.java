@@ -1,8 +1,12 @@
 package lt.printerrental.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.http.HttpResponse;
 import lt.printerrental.transport.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.InvalidBearerTokenException;
 import org.springframework.stereotype.Component;
@@ -11,6 +15,7 @@ import org.springframework.stereotype.Component;
 @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
     "'${IDENTITY_SERVICE_URL:}' != ''")
 public class HttpUserIdentityResolver implements UserIdentityResolver {
+  private static final Logger LOG = LoggerFactory.getLogger(HttpUserIdentityResolver.class);
   private final String url;
   private final ServiceHttpClient client;
   private final ObjectMapper mapper;
@@ -23,18 +28,25 @@ public class HttpUserIdentityResolver implements UserIdentityResolver {
   }
 
   public AppUser resolve(Jwt jwt) {
-    var response =
-        client.send(url, "/api/auth/me", "GET", null, null, "Bearer " + jwt.getTokenValue());
+    HttpResponse<byte[]> response;
+    try {
+      response =
+          client.send(url, "/api/auth/me", "GET", null, null, "Bearer " + jwt.getTokenValue());
+    } catch (UpstreamUnavailableException error) {
+      LOG.warn("Identity service request failed", error);
+      throw new AuthenticationServiceException("Identity service unavailable", error);
+    }
     if (response.statusCode() == 401 || response.statusCode() == 403)
       throw new InvalidBearerTokenException("Identity rejected");
-    if (response.statusCode() != 200)
-      throw new org.springframework.security.authentication.AuthenticationServiceException(
-          "Identity service unavailable");
+    if (response.statusCode() != 200) {
+      LOG.warn("Identity service returned unexpected HTTP status {}", response.statusCode());
+      throw new AuthenticationServiceException("Identity service unavailable");
+    }
     try {
       return mapper.readValue(response.body(), AppUser.class);
     } catch (Exception error) {
-      throw new org.springframework.security.authentication.AuthenticationServiceException(
-          "Invalid identity response");
+      LOG.warn("Failed to parse identity service response", error);
+      throw new AuthenticationServiceException("Invalid identity response", error);
     }
   }
 }

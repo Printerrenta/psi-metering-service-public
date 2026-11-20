@@ -1,6 +1,8 @@
 package lt.printerrental.messaging;
 
 import lt.printerrental.events.EventPublisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -8,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** At-least-once delivery: a crash after publishing may repeat the same event ID. */
 @Service
 public class OutboxBatchPublisher {
+  private static final Logger LOG = LoggerFactory.getLogger(OutboxBatchPublisher.class);
   private final OutboxRepository repository;
   private final EventPublisher publisher;
 
@@ -28,6 +31,11 @@ public class OutboxBatchPublisher {
         publisher.publish(row.event());
         repository.published(row);
       } catch (RuntimeException error) {
+        LOG.warn(
+            "Failed to publish outbox event {} of type {}",
+            row.event().eventId(),
+            row.event().type(),
+            error);
         repository.failed(row);
       }
     }

@@ -9,14 +9,18 @@ import java.net.http.HttpResponse;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.JwtException;
 
 public final class RemoteJwksSigningKeyProvider implements SigningKeyProvider {
+  private static final Logger LOG = LoggerFactory.getLogger(RemoteJwksSigningKeyProvider.class);
   private final URI uri;
   private final HttpClient http;
   private final Clock clock;
   private JWKSet keys;
   private Instant refreshed = Instant.EPOCH;
+  private Instant lastAttempt = Instant.EPOCH;
 
   public RemoteJwksSigningKeyProvider(URI uri, HttpClient http, Clock clock) {
     this.uri = uri;
@@ -27,15 +31,16 @@ public final class RemoteJwksSigningKeyProvider implements SigningKeyProvider {
   @Override
   public synchronized JWK findById(String kid) {
     var now = clock.instant();
-    if (keys == null
-        || refreshed.plusSeconds(300).isBefore(now)
-        || (keys.getKeyByKeyId(kid) == null && refreshed.plusSeconds(10).isBefore(now))) {
+    boolean expired = refreshed.plusSeconds(300).isBefore(now);
+    boolean missingKey = keys != null && keys.getKeyByKeyId(kid) == null;
+    if (keys == null || ((expired || missingKey) && lastAttempt.plusSeconds(10).isBefore(now))) {
       refresh(now);
     }
     return keys.getKeyByKeyId(kid);
   }
 
   private void refresh(Instant now) {
+    lastAttempt = now;
     try {
       var response =
           http.send(
@@ -48,10 +53,19 @@ public final class RemoteJwksSigningKeyProvider implements SigningKeyProvider {
       refreshed = now;
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
+      if (keys != null) {
+        LOG.warn("JWKS refresh interrupted for {}; using cached signing keys", uri, error);
+        return;
+      }
+      LOG.warn("JWKS refresh interrupted for {} with no cached keys", uri, error);
       throw new JwtException("Signing keys unavailable", error);
-    } catch (JwtException error) {
-      throw error;
     } catch (Exception error) {
+      if (keys != null) {
+        LOG.warn("Failed to refresh JWKS from {}; using cached signing keys", uri, error);
+        return;
+      }
+      LOG.warn("Failed to load initial JWKS from {}", uri, error);
+      if (error instanceof JwtException jwtError) throw jwtError;
       throw new JwtException("Signing keys unavailable", error);
     }
   }

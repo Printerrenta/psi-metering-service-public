@@ -8,8 +8,13 @@ import lt.printerrental.auth.*;
 import lt.printerrental.events.EventRecorder;
 import lt.printerrental.integration.*;
 import lt.printerrental.metering.domain.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.*;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class MeteringApplication {
@@ -22,7 +27,37 @@ public class MeteringApplication {
   private final CurrentUser user;
   private final EventRecorder events;
   private final Clock clock;
+  private final TransactionTemplate readView;
+  private final ZoneId businessZone;
   private final ReadingPolicy policy = new ReadingPolicy();
+
+  @Autowired
+  public MeteringApplication(
+      ContractAccess contracts,
+      ContractProjectionUpdater updater,
+      ContractSnapshotStore streams,
+      ReadingRepository readings,
+      UsagePolicyService policies,
+      UserAccess access,
+      CurrentUser user,
+      EventRecorder events,
+      Clock clock,
+      PlatformTransactionManager transactions,
+      @Value("${app.business-zone:Europe/Vilnius}") String businessZone) {
+    this.contracts = contracts;
+    this.updater = updater;
+    this.streams = streams;
+    this.readings = readings;
+    this.policies = policies;
+    this.access = access;
+    this.user = user;
+    this.events = events;
+    this.clock = clock;
+    this.readView = new TransactionTemplate(transactions);
+    this.readView.setReadOnly(true);
+    this.readView.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    this.businessZone = ZoneId.of(businessZone);
+  }
 
   public MeteringApplication(
       ContractAccess contracts,
@@ -33,16 +68,20 @@ public class MeteringApplication {
       UserAccess access,
       CurrentUser user,
       EventRecorder events,
-      Clock clock) {
-    this.contracts = contracts;
-    this.updater = updater;
-    this.streams = streams;
-    this.readings = readings;
-    this.policies = policies;
-    this.access = access;
-    this.user = user;
-    this.events = events;
-    this.clock = clock;
+      Clock clock,
+      PlatformTransactionManager transactions) {
+    this(
+        contracts,
+        updater,
+        streams,
+        readings,
+        policies,
+        access,
+        user,
+        events,
+        clock,
+        transactions,
+        "Europe/Vilnius");
   }
 
   public record Submit(
@@ -59,11 +98,15 @@ public class MeteringApplication {
     var snapshot = contracts.get(id);
     access.owner(snapshot.ownerSubject());
     updater.receive(snapshot);
-    return view(id, 0, 20);
+    return readView.execute(status -> loadView(id, 0, 20));
   }
 
   @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
   public View view(UUID id, int page, int size) {
+    return loadView(id, page, size);
+  }
+
+  private View loadView(UUID id, int page, int size) {
     page(page, size);
     var s =
         streams
@@ -98,7 +141,7 @@ public class MeteringApplication {
     if (duplicate.isPresent()) return duplicate.get();
     if (input.version() != locked.version())
       throw new ApiProblem(409, "Reading stream changed; reload");
-    var context = validate(s, input.asOf(), counts, input.supersedes());
+    var context = validate(s, input.asOf(), counts, input.supersedes(), null);
     var chosen = policies.resolve(s.printerId(), s.modelKey());
     var warnings = warnings(s, input.asOf(), counts, context, chosen);
     var validation = validationSnapshot(chosen);
@@ -138,7 +181,7 @@ public class MeteringApplication {
         || input.reason().strip().length() > 2000)
       throw new IllegalArgumentException("Review reason must be 5..2000 characters");
     if (input.approve()) {
-      validate(locked.snapshot(), r.asOf(), new Counters(r.counters()), r.supersedes());
+      validate(locked.snapshot(), r.asOf(), new Counters(r.counters()), r.supersedes(), r.id());
       if (r.supersedes() != null) readings.supersede(r.supersedes());
     }
     readings.review(
@@ -183,8 +226,9 @@ public class MeteringApplication {
 
   private record Neighbors(MeterReading previous, MeterReading next) {}
 
-  private Neighbors validate(ContractSnapshot s, LocalDate date, Counters counters, UUID replaces) {
-    var today = LocalDate.now(clock.withZone(ZoneId.of("Europe/Vilnius")));
+  private Neighbors validate(
+      ContractSnapshot s, LocalDate date, Counters counters, UUID replaces, UUID reviewingId) {
+    var today = LocalDate.now(clock.withZone(businessZone));
     var end = s.completedReadingDate() == null ? s.endDate() : s.completedReadingDate();
     if (s.status().equals("DRAFT")
         || date.isBefore(s.startDate())
@@ -193,6 +237,10 @@ public class MeteringApplication {
       throw new IllegalArgumentException(
           "Reading date must be today or earlier and within the contract usage period");
     counters.requireCapabilities(s.colorCapable(), s.a3Capable());
+    var pending = readings.pendingOnDate(s.contractId(), date);
+    if (pending.isPresent() && !Objects.equals(pending.get().id(), reviewingId))
+      throw new ApiProblem(
+          409, "A pending reading already exists for this date and must be reviewed first");
     var current = readings.onDate(s.contractId(), date);
     if (current.isPresent() && !Objects.equals(current.get().id(), replaces)
         || current.isEmpty() && replaces != null)

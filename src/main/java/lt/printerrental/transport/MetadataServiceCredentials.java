@@ -7,10 +7,13 @@ import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 @Component
 public class MetadataServiceCredentials implements ServiceCredentials {
+  private static final Logger LOG = LoggerFactory.getLogger(MetadataServiceCredentials.class);
   private static final String BASE =
       "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/";
   private final HttpClient http =
@@ -41,6 +44,7 @@ public class MetadataServiceCredentials implements ServiceCredentials {
     var cached = cache.get(key);
     if (cached != null && cached.expires().isAfter(Instant.now().plusSeconds(60)))
       return cached.value();
+    var kind = access ? "access token" : "identity token";
     try {
       var response =
           http.send(
@@ -50,8 +54,10 @@ public class MetadataServiceCredentials implements ServiceCredentials {
                   .GET()
                   .build(),
               HttpResponse.BodyHandlers.ofString());
-      if (response.statusCode() != 200)
+      if (response.statusCode() != 200) {
+        LOG.warn("Metadata server returned HTTP {} for {}", response.statusCode(), kind);
         throw new IllegalStateException("Service credentials unavailable");
+      }
       String value;
       Instant expiry;
       if (access) {
@@ -67,9 +73,13 @@ public class MetadataServiceCredentials implements ServiceCredentials {
       return value;
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("Service credentials unavailable");
+      LOG.warn("Metadata credential fetch interrupted for {}", kind, error);
+      throw new IllegalStateException("Service credentials unavailable", error);
+    } catch (IllegalStateException error) {
+      throw error;
     } catch (Exception error) {
-      throw new IllegalStateException("Service credentials unavailable");
+      LOG.warn("Metadata credential fetch failed for {}", kind, error);
+      throw new IllegalStateException("Service credentials unavailable", error);
     }
   }
 }

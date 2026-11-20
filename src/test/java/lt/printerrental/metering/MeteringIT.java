@@ -120,6 +120,8 @@ class MeteringIT {
   @Autowired lt.printerrental.metering.application.MeteringApplication app;
   @Autowired lt.printerrental.metering.application.UsagePolicyService policies;
   @Autowired lt.printerrental.metering.application.ReadingReminderService reminders;
+  @Autowired DurableEventInbox inbox;
+  @Autowired com.fasterxml.jackson.databind.ObjectMapper mapper;
   @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
   UUID contract;
   ContractSnapshot source;
@@ -351,5 +353,139 @@ class MeteringIT {
         .andExpect(
             org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
                 .isForbidden());
+  }
+
+  @Test
+  void pendingReadingConflictAndPolicyOverflowReturnClearHttpErrors() throws Exception {
+    as("employee", "EMPLOYEE");
+    policies.save(
+        "MODEL",
+        new lt.printerrental.metering.application.UsagePolicyService.Change(
+            "maker/large", new BigDecimal("100"), new BigDecimal("10000"), 1));
+    as("alice", "CUSTOMER");
+    var pending = app.submit(contract, input(0, LocalDate.of(2026, 1, 31), 2, null));
+    assertThat(pending.reading().status()).isEqualTo("PENDING");
+
+    mvc.perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                    "/api/metering/contracts/" + contract + "/readings")
+                .with(
+                    org.springframework.security.test.web.servlet.request
+                        .SecurityMockMvcRequestPostProcessors.user("alice")
+                        .roles("CUSTOMER"))
+                .contentType("application/json")
+                .content(
+                    mapper.writeValueAsString(
+                        Map.of(
+                            "requestKey",
+                            UUID.randomUUID().toString(),
+                            "version",
+                            pending.version(),
+                            "asOf",
+                            "2026-01-31",
+                            "counters",
+                            List.of(5, 0, 0, 0)))))
+        .andExpect(
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                .isConflict())
+        .andExpect(
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.detail")
+                .value(org.hamcrest.Matchers.containsString("pending reading already exists")));
+
+    mvc.perform(
+            org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                    "/api/metering/policies/MODEL")
+                .with(
+                    org.springframework.security.test.web.servlet.request
+                        .SecurityMockMvcRequestPostProcessors.user("employee")
+                        .roles("EMPLOYEE"))
+                .contentType("application/json")
+                .content(
+                    "{\"key\":\"maker/large\",\"minimumPerDay\":0,"
+                        + "\"maximumPerDay\":10000000000000000,\"version\":2}"))
+        .andExpect(
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.status()
+                .isBadRequest())
+        .andExpect(
+            org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.detail")
+                .value("Policy bounds exceed maximum supported value"));
+  }
+
+  @Test
+  void inboxRetryIsolatesPoisonEventFromHealthyBatchEvents() throws Exception {
+    var firstContract = UUID.randomUUID();
+    var poisonContract = UUID.randomUUID();
+    var secondContract = UUID.randomUUID();
+
+    var firstSnap = snapshot(firstContract);
+    var poisonSnap =
+        new ContractSnapshot(
+            poisonContract,
+            UUID.randomUUID(),
+            "mallory",
+            "maker/large",
+            true,
+            true,
+            "ACTIVE",
+            LocalDate.of(2026, 1, 1),
+            LocalDate.of(2026, 3, 31),
+            null,
+            LocalDate.of(2026, 1, 1),
+            List.of(0L, 0L, 0L, 0L),
+            1,
+            firstSnap.terms());
+    var secondSnap = snapshot(secondContract);
+
+    var firstEvent =
+        new lt.printerrental.events.DomainEvent(
+            UUID.randomUUID(),
+            1,
+            "ContractAccountingChanged",
+            Instant.parse("2026-04-01T00:00:01Z"),
+            firstContract,
+            "alice",
+            Map.of("snapshot", firstSnap));
+    var poisonEvent =
+        new lt.printerrental.events.DomainEvent(
+            UUID.randomUUID(),
+            1,
+            "ContractAccountingChanged",
+            Instant.parse("2026-04-01T00:00:02Z"),
+            poisonContract,
+            "alice",
+            Map.of("snapshot", poisonSnap));
+    var secondEvent =
+        new lt.printerrental.events.DomainEvent(
+            UUID.randomUUID(),
+            1,
+            "ContractAccountingChanged",
+            Instant.parse("2026-04-01T00:00:03Z"),
+            secondContract,
+            "alice",
+            Map.of("snapshot", secondSnap));
+
+    for (var event : List.of(firstEvent, poisonEvent, secondEvent)) {
+      db.update(
+          "INSERT INTO metering.inbox_events(event_id,payload,received_at) VALUES(?,?::jsonb,?)",
+          event.eventId(),
+          mapper.writeValueAsString(event),
+          java.sql.Timestamp.from(event.occurredAt()));
+    }
+
+    inbox.retryPending();
+
+    assertThat(streams.find(firstContract)).isPresent();
+    assertThat(streams.find(poisonContract)).isEmpty();
+    assertThat(streams.find(secondContract)).isPresent();
+    assertThat(
+            db.queryForObject(
+                "SELECT count(*) FROM metering.inbox_events WHERE processed_at IS NOT NULL",
+                Long.class))
+        .isEqualTo(2);
+    assertThat(
+            db.queryForObject(
+                "SELECT event_id FROM metering.inbox_events WHERE processed_at IS NULL",
+                UUID.class))
+        .isEqualTo(poisonEvent.eventId());
   }
 }

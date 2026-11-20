@@ -161,4 +161,23 @@ class NeonJwtDecoderTest {
     org.mockito.Mockito.when(clock.instant()).thenReturn(now.plusSeconds(11));
     assertThat(decoder.decode(nextToken).getSubject()).isEqualTo("customer-a");
   }
+
+  @Test
+  void fallsBackToCachedKeysOnTransientJwksRefreshFailure() throws Exception {
+    var clock = org.mockito.Mockito.mock(java.time.Clock.class);
+    var now = Instant.now();
+    org.mockito.Mockito.when(clock.instant()).thenReturn(now);
+    var provider =
+        new RemoteJwksSigningKeyProvider(
+            java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/jwks"),
+            java.net.http.HttpClient.newHttpClient(),
+            clock);
+    decoder = new NeonJwtDecoder("https://auth.example.test/auth", provider);
+    var jwt = token(claims(), "EdDSA", "key-1", key);
+    assertThat(decoder.decode(jwt).getSubject()).isEqualTo("customer-a");
+
+    server.stop(0);
+    org.mockito.Mockito.when(clock.instant()).thenReturn(now.plusSeconds(305));
+    assertThat(decoder.decode(jwt).getSubject()).isEqualTo("customer-a");
+  }
 }

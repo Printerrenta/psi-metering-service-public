@@ -36,6 +36,11 @@ public class JdbcReadingRepository implements ReadingRepository {
         .findFirst();
   }
 
+  public Optional<MeterReading> pendingOnDate(UUID contract, LocalDate date) {
+    return query("contract_id=? AND as_of=? AND status='PENDING'", contract, date).stream()
+        .findFirst();
+  }
+
   public Optional<MeterReading> previous(UUID contract, LocalDate date) {
     return query(
             "contract_id=? AND as_of<? AND status='ACCEPTED' ORDER BY as_of DESC LIMIT 1",

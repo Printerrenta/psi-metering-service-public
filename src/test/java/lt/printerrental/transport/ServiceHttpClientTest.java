@@ -56,4 +56,41 @@ class ServiceHttpClientTest {
       server.stop(0);
     }
   }
+
+  @Test
+  void normalizesTrailingSlashInServiceUrlAndAudience() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/api/test",
+        exchange -> {
+          var bytes = exchange.getRequestURI().toString().getBytes();
+          exchange.sendResponseHeaders(200, bytes.length);
+          exchange.getResponseBody().write(bytes);
+          exchange.close();
+        });
+    server.start();
+    try {
+      var capturedAudience = new java.util.concurrent.atomic.AtomicReference<String>();
+      var credentials =
+          new ServiceCredentials() {
+            public String identityToken(String audience) {
+              capturedAudience.set(audience);
+              return "google-token";
+            }
+
+            public String accessToken() {
+              return null;
+            }
+          };
+      var base = "http://127.0.0.1:" + server.getAddress().getPort();
+      var result =
+          new ServiceHttpClient(credentials)
+              .send(base + "///", "/api/test?a=1", "GET", null, null, null);
+      assertThat(result.statusCode()).isEqualTo(200);
+      assertThat(new String(result.body())).isEqualTo("/api/test?a=1");
+      assertThat(capturedAudience.get()).isEqualTo(base);
+    } finally {
+      server.stop(0);
+    }
+  }
 }

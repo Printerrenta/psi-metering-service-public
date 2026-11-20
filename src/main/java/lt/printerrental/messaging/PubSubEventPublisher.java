@@ -7,11 +7,14 @@ import java.time.Duration;
 import java.util.*;
 import lt.printerrental.events.*;
 import lt.printerrental.transport.ServiceCredentials;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public class PubSubEventPublisher implements EventPublisher {
+  private static final Logger LOG = LoggerFactory.getLogger(PubSubEventPublisher.class);
   private final HttpClient client =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
   private final URI endpoint;
@@ -62,7 +65,13 @@ public class PubSubEventPublisher implements EventPublisher {
               .header("Content-Type", "application/json");
       if (!emulator) {
         var token = credentials.accessToken();
-        if (token == null) throw new IllegalStateException("Cloud credentials required");
+        if (token == null) {
+          LOG.warn(
+              "Pub/Sub publish aborted: cloud credentials required for event {} ({})",
+              event.eventId(),
+              event.type());
+          throw new IllegalStateException("Cloud credentials required");
+        }
         request.header("Authorization", "Bearer " + token);
       }
       var response =
@@ -73,12 +82,23 @@ public class PubSubEventPublisher implements EventPublisher {
                           mapper.writeValueAsBytes(Map.of("messages", List.of(message)))))
                   .build(),
               HttpResponse.BodyHandlers.discarding());
-      if (response.statusCode() != 200) throw new IllegalStateException("Pub/Sub publish failed");
+      if (response.statusCode() != 200) {
+        LOG.warn(
+            "Pub/Sub publish failed with HTTP {} for event {} ({})",
+            response.statusCode(),
+            event.eventId(),
+            event.type());
+        throw new IllegalStateException("Pub/Sub publish failed");
+      }
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("Pub/Sub publish interrupted");
+      LOG.warn("Pub/Sub publish interrupted for event {} ({})", event.eventId(), event.type(), error);
+      throw new IllegalStateException("Pub/Sub publish interrupted", error);
+    } catch (IllegalStateException error) {
+      throw error;
     } catch (Exception error) {
-      throw new IllegalStateException("Pub/Sub publish failed");
+      LOG.warn("Pub/Sub publish failed for event {} ({})", event.eventId(), event.type(), error);
+      throw new IllegalStateException("Pub/Sub publish failed", error);
     }
   }
 }

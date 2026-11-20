@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class UsagePolicyService {
+  private static final BigDecimal MAX_PER_DAY = new BigDecimal("9999999999999999.9999");
   private final UsagePolicyRepository repository;
   private final UserAccess access;
   private final CurrentUser user;
@@ -25,7 +26,8 @@ public class UsagePolicyService {
   @Transactional
   public UsagePolicyRepository.Policy save(String scope, Change input) {
     access.staff();
-    if (!Set.of("MODEL", "DEVICE").contains(scope)
+    if (input == null
+        || !Set.of("MODEL", "DEVICE").contains(scope)
         || input.key() == null
         || input.key().isBlank()
         || input.key().strip().length() > 255
@@ -33,8 +35,17 @@ public class UsagePolicyService {
     new ReadingPolicy.Bounds(input.minimumPerDay(), input.maximumPerDay());
     if (input.minimumPerDay().scale() > 4 || input.maximumPerDay().scale() > 4)
       throw new IllegalArgumentException("Policy precision exceeds four decimals");
+    if (input.minimumPerDay().compareTo(MAX_PER_DAY) > 0
+        || input.maximumPerDay().compareTo(MAX_PER_DAY) > 0)
+      throw new IllegalArgumentException("Policy bounds exceed maximum supported value");
     var key = input.key().strip().toLowerCase(Locale.ROOT);
-    if (scope.equals("DEVICE")) key = UUID.fromString(key).toString();
+    if (scope.equals("DEVICE")) {
+      try {
+        key = UUID.fromString(key).toString();
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("Device policy key must be a valid UUID");
+      }
+    }
     return repository.save(
         scope, key, input.minimumPerDay(), input.maximumPerDay(), input.version(), user.subject());
   }
@@ -45,7 +56,10 @@ public class UsagePolicyService {
 
   public UsagePolicyRepository.Policy get(String scope, String key) {
     access.staff();
-    if (!java.util.Set.of("MODEL", "DEVICE").contains(scope) || key == null)
+    if (!java.util.Set.of("MODEL", "DEVICE").contains(scope)
+        || key == null
+        || key.isBlank()
+        || key.strip().length() > 255)
       throw new IllegalArgumentException("Invalid policy key");
     return repository
         .find(scope, key.strip().toLowerCase(java.util.Locale.ROOT))
